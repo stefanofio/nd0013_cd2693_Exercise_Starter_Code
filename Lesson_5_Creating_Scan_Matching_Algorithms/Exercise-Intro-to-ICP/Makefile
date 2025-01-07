@@ -111,6 +111,19 @@ depend:
 .PHONY : depend
 
 #=============================================================================
+# Target rules for targets named icp_sol
+
+# Build rule for target.
+icp_sol: cmake_check_build_system
+	$(MAKE) -f CMakeFiles/Makefile2 icp_sol
+.PHONY : icp_sol
+
+# fast build rule for target.
+icp_sol/fast:
+	$(MAKE) -f CMakeFiles/icp_sol.dir/build.make CMakeFiles/icp_sol.dir/build
+.PHONY : icp_sol/fast
+
+#=============================================================================
 # Target rules for targets named icp
 
 # Build rule for target.
@@ -129,6 +142,7 @@ helper.o: helper.cpp.o
 
 # target to build an object file
 helper.cpp.o:
+	$(MAKE) -f CMakeFiles/icp_sol.dir/build.make CMakeFiles/icp_sol.dir/helper.cpp.o
 	$(MAKE) -f CMakeFiles/icp.dir/build.make CMakeFiles/icp.dir/helper.cpp.o
 .PHONY : helper.cpp.o
 
@@ -138,6 +152,7 @@ helper.i: helper.cpp.i
 
 # target to preprocess a source file
 helper.cpp.i:
+	$(MAKE) -f CMakeFiles/icp_sol.dir/build.make CMakeFiles/icp_sol.dir/helper.cpp.i
 	$(MAKE) -f CMakeFiles/icp.dir/build.make CMakeFiles/icp.dir/helper.cpp.i
 .PHONY : helper.cpp.i
 
@@ -147,8 +162,36 @@ helper.s: helper.cpp.s
 
 # target to generate assembly for a file
 helper.cpp.s:
+	$(MAKE) -f CMakeFiles/icp_sol.dir/build.make CMakeFiles/icp_sol.dir/helper.cpp.s
 	$(MAKE) -f CMakeFiles/icp.dir/build.make CMakeFiles/icp.dir/helper.cpp.s
 .PHONY : helper.cpp.s
+
+icp1-main-solution.o: icp1-main-solution.cpp.o
+
+.PHONY : icp1-main-solution.o
+
+# target to build an object file
+icp1-main-solution.cpp.o:
+	$(MAKE) -f CMakeFiles/icp_sol.dir/build.make CMakeFiles/icp_sol.dir/icp1-main-solution.cpp.o
+.PHONY : icp1-main-solution.cpp.o
+
+icp1-main-solution.i: icp1-main-solution.cpp.i
+
+.PHONY : icp1-main-solution.i
+
+# target to preprocess a source file
+icp1-main-solution.cpp.i:
+	$(MAKE) -f CMakeFiles/icp_sol.dir/build.make CMakeFiles/icp_sol.dir/icp1-main-solution.cpp.i
+.PHONY : icp1-main-solution.cpp.i
+
+icp1-main-solution.s: icp1-main-solution.cpp.s
+
+.PHONY : icp1-main-solution.s
+
+# target to generate assembly for a file
+icp1-main-solution.cpp.s:
+	$(MAKE) -f CMakeFiles/icp_sol.dir/build.make CMakeFiles/icp_sol.dir/icp1-main-solution.cpp.s
+.PHONY : icp1-main-solution.cpp.s
 
 icp1-main.o: icp1-main.cpp.o
 
@@ -185,10 +228,14 @@ help:
 	@echo "... depend"
 	@echo "... rebuild_cache"
 	@echo "... edit_cache"
+	@echo "... icp_sol"
 	@echo "... icp"
 	@echo "... helper.o"
 	@echo "... helper.i"
 	@echo "... helper.s"
+	@echo "... icp1-main-solution.o"
+	@echo "... icp1-main-solution.i"
+	@echo "... icp1-main-solution.s"
 	@echo "... icp1-main.o"
 	@echo "... icp1-main.i"
 	@echo "... icp1-main.s"

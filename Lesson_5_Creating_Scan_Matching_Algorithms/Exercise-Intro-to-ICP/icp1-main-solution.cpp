@@ -20,11 +20,12 @@ Eigen::Matrix4d ICP(PointCloudT::Ptr target, PointCloudT::Ptr source, Pose start
   	PointCloudT::Ptr transformSource (new PointCloudT); 
   	pcl::transformPointCloud (*source, *transformSource, initTransform);
 
+	pcl::console::TicToc time;
+  	time.tic ();
   	pcl::IterativeClosestPoint<PointT, PointT> icp;
   	icp.setMaximumIterations (iterations);
   	icp.setInputSource (transformSource);
   	icp.setInputTarget (target);
-	icp.setMaxCorrespondenceDistance(1.0);	
   	PointCloudT::Ptr cloud_icp (new PointCloudT);  // ICP output point cloud
   	icp.align (*cloud_icp);
   	
@@ -102,7 +103,7 @@ int main(){
 	int count = 0;
 	for( Vect2 move : movement ){
 
-		// execute move
+		// exectue move
 		lidar.Move(move.mag, move.theta);
 		poses->points.push_back(PointT(lidar.x, lidar.y, 0));
 
@@ -120,10 +121,10 @@ int main(){
 		
 		// view transformed scan
 		// TODO: perform the transformation on the scan using transform from ICP
-		PointCloudT::Ptr transformed_scan (new PointCloudT);
-		pcl::transformPointCloud (*scan, *transformed_scan, transform);
+  		PointCloudT::Ptr transformed_scan (new PointCloudT);
+  		pcl::transformPointCloud (*scan, *transformed_scan, transform);
 		// TODO: render the correct scan
-		renderPointCloud(viewer, transformed_scan, "transformed_scan_"+to_string(count), Color(0,1,0)); // render scan
+  		renderPointCloud(viewer, transformed_scan, "icp_scan_"+to_string(count), Color(0,1,0)); // render corrected scan
 		
 		count++;
 	}
