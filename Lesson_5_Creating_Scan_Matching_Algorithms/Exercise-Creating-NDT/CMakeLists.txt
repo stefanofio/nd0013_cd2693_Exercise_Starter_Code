@@ -12,6 +12,7 @@ set(CXX_FLAGS "-pthread -fPIC")
 set(CMAKE_CXX_FLAGS "${CXX_FLAGS}")
 
 set(sources ndt-main.cpp helper.cpp)
+set(sources_sol ndt-main-solution.cpp helper.cpp)
 
 find_package(PCL 1.2 REQUIRED)
 
@@ -26,3 +27,7 @@ endif(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
 add_executable(ndt ${sources} )
 
 target_link_libraries(ndt ${PCL_LIBRARIES})
+
+add_executable(ndt_sol ${sources_sol} )
+
+target_link_libraries(ndt_sol ${PCL_LIBRARIES})
