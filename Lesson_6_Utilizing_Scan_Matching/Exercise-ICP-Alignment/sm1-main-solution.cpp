@@ -1,8 +1,6 @@
-// Udacity SDC C3 Localization
-// Dec 21 2020
-// Aaron Brown
 
 using namespace std;
+
 #include <string>
 #include <pcl/io/pcd_io.h>
 #include <pcl/visualization/pcl_visualizer.h>
@@ -13,15 +11,18 @@ using namespace std;
 #include <ctime> 
 #include <pcl/registration/icp.h>
 #include <pcl/registration/ndt.h>
-#include <pcl/console/time.h>
+#include <pcl/console/time.h>   // TicToc
 
-enum Registration{ Off, Icp};
+
+enum Registration{ Off, Icp, Ndt};
 Registration matching = Off;
 
 Pose pose(Point(0,0,0), Rotate(0,0,0));
 Pose savedPose = pose;
 void keyboardEventOccurred(const pcl::visualization::KeyboardEvent &event, void* viewer)
 {
+
+  	//boost::shared_ptr<pcl::visualization::PCLVisualizer> viewer = *static_cast<boost::shared_ptr<pcl::visualization::PCLVisualizer> *>(viewer_void);
 	if (event.getKeySym() == "Right" && event.keyDown()){
 		matching = Off;
 		pose.position.x += 0.1;
@@ -53,6 +54,9 @@ void keyboardEventOccurred(const pcl::visualization::KeyboardEvent &event, void*
 	else if(event.getKeySym() == "i" && event.keyDown()){
 		matching = Icp;
 	}
+	else if(event.getKeySym() == "n" && event.keyDown()){
+		matching = Ndt;
+	}
 	else if(event.getKeySym() == "space" && event.keyDown()){
 		matching = Off;
 		pose = savedPose;
@@ -66,35 +70,52 @@ void keyboardEventOccurred(const pcl::visualization::KeyboardEvent &event, void*
 
 Eigen::Matrix4d ICP(PointCloudT::Ptr target, PointCloudT::Ptr source, Pose startingPose, int iterations){
 
+	// Defining a rotation matrix and translation vector
   	Eigen::Matrix4d transformation_matrix = Eigen::Matrix4d::Identity ();
 
-  	// TODO: Implement the PCL ICP function and return the correct transformation matrix
-  	// .....
-
-	// align source with starting pose
-  	Eigen::Matrix4d initTransform = transform3D(
-		startingPose.rotation.yaw, startingPose.rotation.pitch, startingPose.rotation.roll,
-		startingPose.position.x, startingPose.position.y, startingPose.position.z );
+  	// align source with starting pose
+  	Eigen::Matrix4d initTransform = transform3D(startingPose.rotation.yaw, startingPose.rotation.pitch, startingPose.rotation.roll, startingPose.position.x, startingPose.position.y, startingPose.position.z);
   	PointCloudT::Ptr transformSource (new PointCloudT); 
   	pcl::transformPointCloud (*source, *transformSource, initTransform);
 
+  	/*
+  	if( count == 0)
+  		renderPointCloud(viewer, transformSource, "transform_scan_"+to_string(count), Color(1,0,1)); // render corrected scan
+  	*/
+	
 	pcl::console::TicToc time;
   	time.tic ();
   	pcl::IterativeClosestPoint<PointT, PointT> icp;
   	icp.setMaximumIterations (iterations);
   	icp.setInputSource (transformSource);
   	icp.setInputTarget (target);
+	icp.setMaxCorrespondenceDistance (2);
+	//icp.setTransformationEpsilon(0.001);
+	//icp.setEuclideanFitnessEpsilon(.05);
+	//icp.setRANSACOutlierRejectionThreshold (10);
+
   	PointCloudT::Ptr cloud_icp (new PointCloudT);  // ICP output point cloud
   	icp.align (*cloud_icp);
-  	
+  	//std::cout << "Applied " << iterations << " ICP iteration(s) in " << time.toc () << " ms" << std::endl;
+
   	if (icp.hasConverged ())
   	{
-  		std::cout << "\nICP has converged, score is " << icp.getFitnessScore () << std::endl;
+  		//std::cout << "\nICP has converged, score is " << icp.getFitnessScore () << std::endl;
   		transformation_matrix = icp.getFinalTransformation ().cast<double>();
   		transformation_matrix =  transformation_matrix * initTransform;
+  		//print4x4Matrix(transformation_matrix);
+
+
+  		/*
+  		PointCloudT::Ptr corrected_scan (new PointCloudT);
+  		pcl::transformPointCloud (*source, *corrected_scan, transformation_matrix);
+  		if( count == 1)
+  			renderPointCloud(viewer, corrected_scan, "corrected_scan_"+to_string(count), Color(0,1,1)); // render corrected scan
+		*/
   		return transformation_matrix;
   	}
-  	cout << "WARNING: ICP did not converge" << endl;
+	else
+  		cout << "WARNING: ICP did not converge" << endl;
   	return transformation_matrix;
 
 }
@@ -108,6 +129,15 @@ void drawCar(Pose pose, int num, Color color, double alpha, pcl::visualization::
     box.cube_width = 2;
     box.cube_height = 2;
 	renderBox(viewer, box, num, color, alpha);
+}
+
+void loadScans(vector<PointCloudT::Ptr>& scans, int num){
+	for(int index = 0; index < num; index++){
+		// Load scan
+		PointCloudT::Ptr scanCloud(new PointCloudT);
+  		pcl::io::loadPCDFile("scan"+to_string(index+1)+".pcd", *scanCloud);
+  		scans.push_back(scanCloud);
+	}
 }
 
 struct Tester{
@@ -165,22 +195,7 @@ struct Tester{
 
 };
 
-#include <iostream>
-#include <cstdlib> // Per std::atoi e std::atof
-
-
-
-
-int main(int argc, char* argv[]){
-    
-    // Parse arguments
-	int iteration = 50;
-    float vox_x = 0.05f, vox_y = 0.05f, vox_z = 0.05f;
-
-    if (argc > 1) iteration = std::atoi(argv[1]);      // icp iterations
-    if (argc > 2) vox_x = std::atof(argv[2]);          // voxel size vox_x
-    if (argc > 3) vox_y = std::atof(argv[3]);          // voxel size vox_y
-    if (argc > 4) vox_z = std::atof(argv[4]);          // voxel size  vox_z
+int main(){
 
 	pcl::visualization::PCLVisualizer::Ptr viewer (new pcl::visualization::PCLVisualizer ("3D Viewer"));
   	viewer->setBackgroundColor (0, 0, 0);
@@ -189,29 +204,30 @@ int main(int argc, char* argv[]){
 
 	// Load map and display it
 	PointCloudT::Ptr mapCloud(new PointCloudT);
-  	pcl::io::loadPCDFile("map.pcd", *mapCloud);
+  	if (pcl::io::loadPCDFile("map.pcd", *mapCloud) == -1) //* load the file
+  	{
+    	PCL_ERROR ("Couldn't read file \n");
+  	}
   	cout << "Loaded " << mapCloud->points.size() << " data points from map.pcd" << endl;
+	
 	renderPointCloud(viewer, mapCloud, "map", Color(0,0,1)); 
 
-	// True pose for the input scan
 	vector<Pose> truePose ={Pose(Point(2.62296,0.0384164,0), Rotate(6.10189e-06,0,0)), Pose(Point(4.91308,0.0732088,0), Rotate(3.16001e-05,0,0))};
+
+	vector<PointCloudT::Ptr> scans;
+	loadScans(scans, 1);
+
 	drawCar(truePose[0], 0,  Color(1,0,0), 0.7, viewer);
-
-	// Load input scan
-	PointCloudT::Ptr scanCloud(new PointCloudT);
-  	pcl::io::loadPCDFile("scan1.pcd", *scanCloud);
-
-	typename pcl::PointCloud<PointT>::Ptr cloudFiltered (new pcl::PointCloud<PointT>);
-
-	//TODO: Create voxel filter for input scan and save to cloudFiltered
-	// ......
+	
 	pcl::VoxelGrid<PointT> vg;
-	vg.setInputCloud(scanCloud);
-	vg.setLeafSize(vox_x, vox_y, vox_z);
-	vg.filter(*cloudFiltered);
-
+  	vg.setInputCloud(scans[0]);
+	double filterRes = 0.5;
+  	vg.setLeafSize(filterRes, filterRes, filterRes);
+	typename pcl::PointCloud<PointT>::Ptr cloudFiltered (new pcl::PointCloud<PointT>);
+  	vg.filter(*cloudFiltered);
 
 	PointCloudT::Ptr transformed_scan (new PointCloudT);
+
 	Tester tester;
 
 	while (!viewer->wasStopped())
@@ -219,8 +235,8 @@ int main(int argc, char* argv[]){
 		Eigen::Matrix4d transform = transform3D(pose.rotation.yaw, pose.rotation.pitch, pose.rotation.roll, pose.position.x, pose.position.y, pose.position.z);
 
 		if( matching != Off){
-			if( matching == Icp)
-				transform = ICP(mapCloud, cloudFiltered, pose, iteration); //TODO: change the number of iterations to positive number
+			if(matching == Icp)
+				transform = ICP(mapCloud, cloudFiltered, pose, 3);
   			pose = getPose(transform);
 			if( !tester.Displacement(pose) ){
 				if(matching == Icp)
