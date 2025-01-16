@@ -88,7 +88,7 @@ Eigen::Matrix4d ICP(PointCloudT::Ptr target, PointCloudT::Ptr source, Pose start
   	icp.setInputSource (transformSource);
   	icp.setInputTarget (target);
 	icp.setMaxCorrespondenceDistance (2);
-	//icp.setTransformationEpsilon(0.001);
+	icp.setTransformationEpsilon(0.001);
 	//icp.setEuclideanFitnessEpsilon(.05);
 	//icp.setRANSACOutlierRejectionThreshold (10);
 
@@ -182,10 +182,27 @@ int main(int argc, char* argv[]){
     
     // Parse arguments
 	Registration matching = Off;
-
+	double filterRes = 0.5;
+	int iterations = 10;
+	double ndt_res = 1;
+	double filter_map = 0.0;
+	bool cheat = false;
 
     if (argc > 1) matching = std::atoi(argv[1]) == 0 ? Icp : Ndt;      // scan matching type
+	if (argc > 2) filterRes = std::atof(argv[2]);      // Voxel Leaf Size
+	if (argc > 3) iterations = std::atoi(argv[3]);      // scan matching al iterations
+	if (argc > 4) ndt_res = std::atof(argv[4]);      // ndt resolution
+	if (argc > 5) filter_map = std::atof(argv[5]);      // apply voxelization to map for faster compute, espetially icp
+	if (argc > 6) cheat = std::atoi(argv[6]) == 0 ? false : true;      // use gt as input to scan matching
 
+	cout << "Params set to " << endl;
+	cout << "matching mode " << matching << endl;
+	cout << "filterRes  " << filterRes << endl;
+	cout << "iterations " << iterations << endl;
+	cout << "ndt_res " << ndt_res << endl;
+	cout << "filter_map " << filter_map << endl;
+	cout << "cheat " << cheat << endl;
+	
 
 
 	auto client = cc::Client("localhost", 2000);
@@ -226,8 +243,20 @@ int main(int argc, char* argv[]){
 
 	// Load map
 	PointCloudT::Ptr mapCloud(new PointCloudT);
-  	pcl::io::loadPCDFile("map.pcd", *mapCloud);
-  	cout << "Loaded " << mapCloud->points.size() << " data points from map.pcd" << endl;
+	PointCloudT::Ptr mapCloud_load(new PointCloudT);
+  	pcl::io::loadPCDFile("map.pcd", *mapCloud_load);
+  	cout << "Loaded " << mapCloud_load->points.size() << " data points from map.pcd" << endl;
+	if (filter_map > 0.0){
+		pcl::VoxelGrid<PointT> vg_map;
+		vg_map.setInputCloud(mapCloud_load);
+		vg_map.setLeafSize(filter_map, filter_map, filter_map);
+		vg_map.filter(*mapCloud);
+		cout << "Filtered to " << mapCloud->points.size() << " data points" << endl;
+	}
+	else{
+		mapCloud = mapCloud_load;
+	}
+			
 	renderPointCloud(viewer, mapCloud, "map", Color(0,0,1)); 
 
 	typename pcl::PointCloud<PointT>::Ptr cloudFiltered (new pcl::PointCloud<PointT>);
@@ -239,7 +268,7 @@ int main(int argc, char* argv[]){
 			auto scan = boost::static_pointer_cast<csd::LidarMeasurement>(data);
 			for (auto detection : *scan){
 				if((detection.x*detection.x + detection.y*detection.y + detection.z*detection.z) > 8.0){
-					pclCloud.points.push_back(PointT(detection.x, detection.y, detection.z));
+					pclCloud.points.push_back(PointT(-detection.y, detection.x, detection.z));
 				}
 			}
 			if(pclCloud.points.size() > 5000){ // CANDO: Can modify this value to get different scan resolutions
@@ -291,7 +320,6 @@ int main(int argc, char* argv[]){
 			// TODO: (Filter scan using voxel filter)
 			pcl::VoxelGrid<PointT> vg;
 			vg.setInputCloud(scanCloud);
-			double filterRes = 0.5;
 			vg.setLeafSize(filterRes, filterRes, filterRes);
 			typename pcl::PointCloud<PointT>::Ptr cloudFiltered (new pcl::PointCloud<PointT>);
 			vg.filter(*cloudFiltered);
@@ -302,14 +330,17 @@ int main(int argc, char* argv[]){
 			// Setting maximum step size for More-Thuente line search.
 			ndt.setStepSize (1);
 			//Setting Resolution of NDT grid structure (VoxelGridCovariance).
-			ndt.setResolution (1);
+			ndt.setResolution (ndt_res);
 			ndt.setInputTarget (mapCloud);
 			//pose = ....
+			if (cheat){
+			pose = Pose(Point(vehicle->GetTransform().location.x, vehicle->GetTransform().location.y, vehicle->GetTransform().location.z), Rotate(vehicle->GetTransform().rotation.yaw * pi/180, vehicle->GetTransform().rotation.pitch * pi/180, vehicle->GetTransform().rotation.roll * pi/180)) - poseRef;
+			}
 			if( matching != Off){
 				if( matching == Ndt)
-					transform_scan_matching = NDT(ndt, cloudFiltered, pose, 3);
+					transform_scan_matching = NDT(ndt, cloudFiltered, pose, iterations);
 				else if(matching == Icp)
-					transform_scan_matching = ICP(mapCloud, cloudFiltered, pose, 3);
+					transform_scan_matching = ICP(mapCloud, cloudFiltered, pose, iterations);
 				pose = getPose(transform_scan_matching);
 			}
 			// TODO: Transform scan so it aligns with ego's actual pose and render that scan
