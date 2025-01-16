@@ -40,6 +40,9 @@ cc::Vehicle::Control control;
 std::chrono::time_point<std::chrono::system_clock> currentTime;
 vector<ControlState> cs;
 
+enum Registration{ Off, Icp, Ndt};
+
+
 bool refresh_view = false;
 void keyboardEventOccurred(const pcl::visualization::KeyboardEvent &event, void* viewer)
 {
@@ -60,6 +63,82 @@ void keyboardEventOccurred(const pcl::visualization::KeyboardEvent &event, void*
 	if(event.getKeySym() == "a" && event.keyDown()){
 		refresh_view = true;
 	}
+}
+
+
+Eigen::Matrix4d ICP(PointCloudT::Ptr target, PointCloudT::Ptr source, Pose startingPose, int iterations){
+
+	// Defining a rotation matrix and translation vector
+  	Eigen::Matrix4d transformation_matrix = Eigen::Matrix4d::Identity ();
+
+  	// align source with starting pose
+  	Eigen::Matrix4d initTransform = transform3D(startingPose.rotation.yaw, startingPose.rotation.pitch, startingPose.rotation.roll, startingPose.position.x, startingPose.position.y, startingPose.position.z);
+  	PointCloudT::Ptr transformSource (new PointCloudT); 
+  	pcl::transformPointCloud (*source, *transformSource, initTransform);
+
+  	/*
+  	if( count == 0)
+  		renderPointCloud(viewer, transformSource, "transform_scan_"+to_string(count), Color(1,0,1)); // render corrected scan
+  	*/
+	
+	pcl::console::TicToc time;
+  	time.tic ();
+  	pcl::IterativeClosestPoint<PointT, PointT> icp;
+  	icp.setMaximumIterations (iterations);
+  	icp.setInputSource (transformSource);
+  	icp.setInputTarget (target);
+	icp.setMaxCorrespondenceDistance (2);
+	//icp.setTransformationEpsilon(0.001);
+	//icp.setEuclideanFitnessEpsilon(.05);
+	//icp.setRANSACOutlierRejectionThreshold (10);
+
+  	PointCloudT::Ptr cloud_icp (new PointCloudT);  // ICP output point cloud
+  	icp.align (*cloud_icp);
+  	//std::cout << "Applied " << iterations << " ICP iteration(s) in " << time.toc () << " ms" << std::endl;
+
+  	if (icp.hasConverged ())
+  	{
+  		//std::cout << "\nICP has converged, score is " << icp.getFitnessScore () << std::endl;
+  		transformation_matrix = icp.getFinalTransformation ().cast<double>();
+  		transformation_matrix =  transformation_matrix * initTransform;
+  		//print4x4Matrix(transformation_matrix);
+
+
+  		/*
+  		PointCloudT::Ptr corrected_scan (new PointCloudT);
+  		pcl::transformPointCloud (*source, *corrected_scan, transformation_matrix);
+  		if( count == 1)
+  			renderPointCloud(viewer, corrected_scan, "corrected_scan_"+to_string(count), Color(0,1,1)); // render corrected scan
+		*/
+  		return transformation_matrix;
+  	}
+	else
+  		cout << "WARNING: ICP did not converge" << endl;
+  	return transformation_matrix;
+
+}
+
+Eigen::Matrix4d NDT(pcl::NormalDistributionsTransform<pcl::PointXYZ, pcl::PointXYZ> ndt, PointCloudT::Ptr source, Pose startingPose, int iterations){
+
+	
+	pcl::console::TicToc time;
+	time.tic ();
+
+	Eigen::Matrix4f init_guess = transform3D(startingPose.rotation.yaw, startingPose.rotation.pitch, startingPose.rotation.roll, startingPose.position.x, startingPose.position.y, startingPose.position.z).cast<float>();
+
+  	// Setting max number of registration iterations.
+  	ndt.setMaximumIterations (iterations);
+	ndt.setInputSource (source);
+  	
+	pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_ndt (new pcl::PointCloud<pcl::PointXYZ>);
+  	ndt.align (*cloud_ndt, init_guess);
+
+	//cout << "Normal Distributions Transform has converged:" << ndt.hasConverged () << " score: " << ndt.getFitnessScore () <<  " time: " << time.toc() <<  " ms" << endl;
+
+	Eigen::Matrix4d transformation_matrix = ndt.getFinalTransformation ().cast<double>();
+
+	return transformation_matrix;
+
 }
 
 void Accuate(ControlState response, cc::Vehicle::Control& state){
@@ -99,7 +178,15 @@ void drawCar(Pose pose, int num, Color color, double alpha, pcl::visualization::
 	renderBox(viewer, box, num, color, alpha);
 }
 
-int main(){
+int main(int argc, char* argv[]){
+    
+    // Parse arguments
+	Registration matching = Off;
+
+
+    if (argc > 1) matching = std::atoi(argv[1]) == 0 ? Icp : Ndt;      // scan matching type
+
+
 
 	auto client = cc::Client("localhost", 2000);
 	client.SetTimeout(2s);
@@ -135,6 +222,7 @@ int main(){
 
 	auto vehicle = boost::static_pointer_cast<cc::Vehicle>(ego_actor);
 	Pose pose(Point(0,0,0), Rotate(0,0,0));
+	Eigen::Matrix4d transform_scan_matching; 
 
 	// Load map
 	PointCloudT::Ptr mapCloud(new PointCloudT);
@@ -201,15 +289,37 @@ int main(){
 			
 			new_scan = true;
 			// TODO: (Filter scan using voxel filter)
-
+			pcl::VoxelGrid<PointT> vg;
+			vg.setInputCloud(scanCloud);
+			double filterRes = 0.5;
+			vg.setLeafSize(filterRes, filterRes, filterRes);
+			typename pcl::PointCloud<PointT>::Ptr cloudFiltered (new pcl::PointCloud<PointT>);
+			vg.filter(*cloudFiltered);
 			// TODO: Find pose transform by using ICP or NDT matching
+			pcl::NormalDistributionsTransform<pcl::PointXYZ, pcl::PointXYZ> ndt;
+			// Setting minimum transformation difference for termination condition.
+			ndt.setTransformationEpsilon (.0001);
+			// Setting maximum step size for More-Thuente line search.
+			ndt.setStepSize (1);
+			//Setting Resolution of NDT grid structure (VoxelGridCovariance).
+			ndt.setResolution (1);
+			ndt.setInputTarget (mapCloud);
 			//pose = ....
-
+			if( matching != Off){
+				if( matching == Ndt)
+					transform_scan_matching = NDT(ndt, cloudFiltered, pose, 3);
+				else if(matching == Icp)
+					transform_scan_matching = ICP(mapCloud, cloudFiltered, pose, 3);
+				pose = getPose(transform_scan_matching);
+			}
 			// TODO: Transform scan so it aligns with ego's actual pose and render that scan
-
+			Eigen::Matrix4d applyTransform = transform3D(pose.rotation.yaw, pose.rotation.pitch, pose.rotation.roll, pose.position.x, pose.position.y, pose.position.z);
+  	
+			PointCloudT::Ptr transformed_scan (new PointCloudT);
+  			pcl::transformPointCloud (*cloudFiltered, *transformed_scan, applyTransform);
 			viewer->removePointCloud("scan");
 			// TODO: Change `scanCloud` below to your transformed scan
-			renderPointCloud(viewer, scanCloud, "scan", Color(1,0,0) );
+			renderPointCloud(viewer, transformed_scan, "scan", Color(1,0,0) );
 
 			viewer->removeAllShapes();
 			drawCar(pose, 1,  Color(0,1,0), 0.35, viewer);
