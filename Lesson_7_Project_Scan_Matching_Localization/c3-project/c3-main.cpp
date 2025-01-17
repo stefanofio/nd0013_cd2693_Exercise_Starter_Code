@@ -40,7 +40,7 @@ cc::Vehicle::Control control;
 std::chrono::time_point<std::chrono::system_clock> currentTime;
 vector<ControlState> cs;
 
-enum Registration{ Off, Icp, Ndt};
+enum Registration{ Icp, Ndt};
 
 
 bool refresh_view = false;
@@ -132,12 +132,19 @@ Eigen::Matrix4d NDT(pcl::NormalDistributionsTransform<pcl::PointXYZ, pcl::PointX
   	
 	pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_ndt (new pcl::PointCloud<pcl::PointXYZ>);
   	ndt.align (*cloud_ndt, init_guess);
-
-	//cout << "Normal Distributions Transform has converged:" << ndt.hasConverged () << " score: " << ndt.getFitnessScore () <<  " time: " << time.toc() <<  " ms" << endl;
-
-	Eigen::Matrix4d transformation_matrix = ndt.getFinalTransformation ().cast<double>();
-
-	return transformation_matrix;
+  	if (ndt.hasConverged ())
+  	{
+		//cout << "Normal Distributions Transform has converged:" << ndt.hasConverged () << " score: " << ndt.getFitnessScore () <<  " time: " << time.toc() <<  " ms" << endl;
+		Eigen::Matrix4d transformation_matrix = ndt.getFinalTransformation ().cast<double>();
+		return transformation_matrix;
+	}
+	else{
+		cout << "WARNING: NDT did not converge" << endl;
+		// Defining a rotation matrix and translation vector
+  	 	Eigen::Matrix4d transformation_matrix = Eigen::Matrix4d::Identity ();
+		return transformation_matrix;
+	}
+	
 
 }
 
@@ -181,9 +188,9 @@ void drawCar(Pose pose, int num, Color color, double alpha, pcl::visualization::
 int main(int argc, char* argv[]){
     
     // Parse arguments
-	Registration matching = Off;
-	double filterRes = 0.5;
-	int iterations = 10;
+	Registration matching = Ndt;
+	double filterRes = 1;
+	int iterations = 50;
 	double ndt_res = 1;
 	double filter_map = 0.0;
 	bool cheat = false;
@@ -196,15 +203,13 @@ int main(int argc, char* argv[]){
 	if (argc > 6) cheat = std::atoi(argv[6]) == 0 ? false : true;      // use gt as input to scan matching
 
 	cout << "Params set to " << endl;
-	cout << "matching mode " << matching << endl;
-	cout << "filterRes  " << filterRes << endl;
-	cout << "iterations " << iterations << endl;
-	cout << "ndt_res " << ndt_res << endl;
-	cout << "filter_map " << filter_map << endl;
-	cout << "cheat " << cheat << endl;
+	cout << "matching mode (0 = ICP, 1 = NDT) " << matching << endl;
+	cout << "scan voxel leaf size  " << filterRes << endl;
+	cout << "scan matching iterations " << iterations << endl;
+	cout << "ndt grid resolution " << ndt_res << endl;
+	cout << "map voxel leaf size (0 = NO Voxelization)" << filter_map << endl;
+	cout << "use gt pose as scan matching input " << cheat << endl;
 	
-
-
 	auto client = cc::Client("localhost", 2000);
 	client.SetTimeout(2s);
 	auto world = client.GetWorld();
@@ -268,7 +273,7 @@ int main(int argc, char* argv[]){
 			auto scan = boost::static_pointer_cast<csd::LidarMeasurement>(data);
 			for (auto detection : *scan){
 				if((detection.x*detection.x + detection.y*detection.y + detection.z*detection.z) > 8.0){
-					pclCloud.points.push_back(PointT(-detection.y, detection.x, detection.z));
+					pclCloud.points.push_back(PointT(-detection.y, detection.x, -detection.z));
 				}
 			}
 			if(pclCloud.points.size() > 5000){ // CANDO: Can modify this value to get different scan resolutions
@@ -281,6 +286,11 @@ int main(int argc, char* argv[]){
 	
 	Pose poseRef(Point(vehicle->GetTransform().location.x, vehicle->GetTransform().location.y, vehicle->GetTransform().location.z), Rotate(vehicle->GetTransform().rotation.yaw * pi/180, vehicle->GetTransform().rotation.pitch * pi/180, vehicle->GetTransform().rotation.roll * pi/180));
 	double maxError = 0;
+
+	// initialize pose in gt at time 0, and also set time
+	pcl::console::TicToc time;
+	bool first_iter = true;
+	Pose pose_prev;
 
 	while (!viewer->wasStopped())
   	{
@@ -336,13 +346,27 @@ int main(int argc, char* argv[]){
 			if (cheat){
 			pose = Pose(Point(vehicle->GetTransform().location.x, vehicle->GetTransform().location.y, vehicle->GetTransform().location.z), Rotate(vehicle->GetTransform().rotation.yaw * pi/180, vehicle->GetTransform().rotation.pitch * pi/180, vehicle->GetTransform().rotation.roll * pi/180)) - poseRef;
 			}
-			if( matching != Off){
-				if( matching == Ndt)
-					transform_scan_matching = NDT(ndt, cloudFiltered, pose, iterations);
-				else if(matching == Icp)
-					transform_scan_matching = ICP(mapCloud, cloudFiltered, pose, iterations);
-				pose = getPose(transform_scan_matching);
+			else{// calculate prediction of pose based on previous estimates
+				if (first_iter){
+					float dt = 0.0;
+					first_iter = false;
+					pose = truePose;
+					pose_prev = pose;
+				}
+				else{
+					float dt = time.toc ();
+				}
+				time.tic ();
+				// speed calculation
+				Pose negative_pose_delta = pose_prev - pose;
+				pose_prev = pose;
+				pose = pose - negative_pose_delta; // only - operator is defined in helper, for reasons... 
 			}
+			if( matching == Ndt)
+				transform_scan_matching = NDT(ndt, cloudFiltered, pose, iterations);
+			else if(matching == Icp)
+				transform_scan_matching = ICP(mapCloud, cloudFiltered, pose, iterations);
+			pose = getPose(transform_scan_matching);
 			// TODO: Transform scan so it aligns with ego's actual pose and render that scan
 			Eigen::Matrix4d applyTransform = transform3D(pose.rotation.yaw, pose.rotation.pitch, pose.rotation.roll, pose.position.x, pose.position.y, pose.position.z);
   	
